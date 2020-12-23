@@ -378,7 +378,7 @@ MStatus checkMeshDoubleFace::doIt(const MArgList& args) {
 
     // ======================================================================
     // check mesh size.
-    if (taskData.meshArray.size() == 0) {
+    if (taskData.meshes.size() == 0) {
         stat = redoIt();
         return stat;
     }
