@@ -353,6 +353,13 @@ MStatus checkMeshFreeze::doIt(const MArgList& args) {
 #endif // _DEBUG
 
     // ======================================================================
+    // check mesh size.
+    if (taskData.meshArray.size() == 0) {
+        stat = redoIt();
+        return stat;
+    }
+
+    // ======================================================================
     // Thread init.
     stat = MThreadPool::init();
     CheckDisplayErrorRelease(stat, "doIt: could not create threadpool.\n");
