@@ -51,7 +51,6 @@ SOFTWARE.
         MGlobal::displayError(MSG);    \
     }
 
-
 #define CheckDisplayError(STAT,MSG)    \
     if ( MStatus::kSuccess != STAT ) { \
         MGlobal::displayError(MSG);    \
@@ -81,379 +80,413 @@ SOFTWARE.
 class Timer
 {
 public:
-    Timer(MStatus* stat = nullptr) {
-        if (stat != nullptr) {
-            restart();
-        }
-        else {
-            *stat = restart();
-        }
-    }
+	Timer(MStatus* stat = nullptr) {
+		if (stat != nullptr) {
+			restart();
+		}
+		else {
+			*stat = restart();
+		}
+	}
 
-    MStatus restart() {
-        if (!QueryPerformanceFrequency(&_freq)) {
-            return MStatus::kFailure;
-        }
+	MStatus restart() {
+		if (!QueryPerformanceFrequency(&_freq)) {
+			return MStatus::kFailure;
+		}
 
-        if (!QueryPerformanceCounter(&_start)) {
-            return MStatus::kFailure;
-        }
+		if (!QueryPerformanceCounter(&_start)) {
+			return MStatus::kFailure;
+		}
 
-        return MStatus::kSuccess;
-    }
+		return MStatus::kSuccess;
+	}
 
-    double  elapsed(MStatus* stat = nullptr) {
-        if (!QueryPerformanceCounter(&_end)) {
-            if (stat != nullptr) {
-                *stat = MStatus::kFailure;
-            }
-            return 0.0;
-        }
+	double  elapsed(MStatus* stat = nullptr) {
+		if (!QueryPerformanceCounter(&_end)) {
+			if (stat != nullptr) {
+				*stat = MStatus::kFailure;
+			}
+			return 0.0;
+		}
 
-        if (stat != nullptr) {
-            *stat = MStatus::kSuccess;
-        }
+		if (stat != nullptr) {
+			*stat = MStatus::kSuccess;
+		}
 
-        return (double)(_end.QuadPart - _start.QuadPart) / _freq.QuadPart;
-    }
+		return (double)(_end.QuadPart - _start.QuadPart) / _freq.QuadPart;
+	}
 private:
-    LARGE_INTEGER _freq;
-    LARGE_INTEGER _start;
-    LARGE_INTEGER _end;
+	LARGE_INTEGER _freq;
+	LARGE_INTEGER _start;
+	LARGE_INTEGER _end;
 };
 #endif // _DEBUG
 
 class checkMeshDoubleFace : public MPxCommand
 {
-    public:
-        checkMeshDoubleFace();
-        virtual ~checkMeshDoubleFace();
-        MStatus doIt(const MArgList& args);
-        MStatus redoIt();
-        MStatus undoIt();
-        bool isUndoable() const;
-        static void* creator();
-        static MSyntax createSyntax();
-    private:
-        MSelectionList _beforeSelection;
-        MSelectionList _invalid;
-        bool _isSelect;
+public:
+	checkMeshDoubleFace();
+	virtual ~checkMeshDoubleFace();
+	MStatus doIt(const MArgList& args);
+	MStatus redoIt();
+	MStatus undoIt();
+	bool isUndoable() const;
+	static void* creator();
+	static MSyntax createSyntax();
+private:
+	MSelectionList _beforeSelection;
+	MSelectionList _invalid;
+	bool _isSelect;
 };
 
-checkMeshDoubleFace::checkMeshDoubleFace() {
+checkMeshDoubleFace::checkMeshDoubleFace()
+	:
+	_isSelect(false),
+	_beforeSelection(),
+	_invalid()
+{
 }
+
 checkMeshDoubleFace::~checkMeshDoubleFace() {
 }
 
 MSyntax checkMeshDoubleFace::createSyntax() {
-    MSyntax syntax;
+	MSyntax syntax;
 
-    syntax.addFlag("-s", "-select", MSyntax::kNoArg);
-    return syntax;
+	syntax.addFlag("-s", "-select", MSyntax::kNoArg);
+	return syntax;
 }
 
 typedef struct _taskDataTag
 {
-    // step 1
-    std::deque<MDagPath> meshes;
+	// step 1
+	std::deque<MDagPath> meshes;
 
-    // step 2
-    MSelectionList invalidList;
+	// step 2
+	MSelectionList invalidList;
 
-    MStatus stat;
-
+	MStatus stat;
 } TaskData;
 
 // step 1
 MStatus getAllMesh(
-        TaskData& taskData // in out
+	TaskData& taskData // in out
 ) {
-    MItDag dagIter(MItDag::kDepthFirst, MFn::kMesh, &taskData.stat);
-    CheckDisplayError(taskData.stat, "getAllMesh: could not create dagIter.\n");
+	MItDag dagIter(MItDag::kDepthFirst, MFn::kMesh, &taskData.stat);
+	CheckDisplayError(taskData.stat, "getAllMesh: could not create dagIter.\n");
 
-    MDagPath dagPath;
-    for (; !dagIter.isDone(); dagIter.next()) {
-        taskData.stat = dagIter.getPath(dagPath);
-        CheckDisplayError(taskData.stat, "getAllMesh: could not get dag path.\n");
+	MDagPath dagPath;
+	for (; !dagIter.isDone(); dagIter.next()) {
+		taskData.stat = dagIter.getPath(dagPath);
+		CheckDisplayError(taskData.stat, "getAllMesh: could not get dag path.\n");
 
-        MFnDagNode dagNode(dagPath, &taskData.stat);
-        CheckDisplayError(taskData.stat, "getAllMesh: could not get dag node.\n");
+		MFnDagNode dagNode(dagPath, &taskData.stat);
+		CheckDisplayError(taskData.stat, "getAllMesh: could not get dag node.\n");
 
-        if (dagNode.isIntermediateObject()) {
-            continue;
-        }
+		if (dagNode.isIntermediateObject()) {
+			continue;
+		}
 
-        taskData.meshes.push_back(dagPath);
-    }
-    return taskData.stat;
+		MPlug fcPlug = dagNode.findPlug("fc", false, &taskData.stat);
+		CheckDisplayError(taskData.stat, "getAllMesh: could not get fc plug.");
+
+		const auto& fcSize = fcPlug.numElements(&taskData.stat);
+		CheckDisplayError(taskData.stat, "getAllMesh: could not get fc size.");
+
+		if (fcSize == 0) {
+			continue;
+		}
+
+		taskData.meshes.push_back(dagPath);
+	}
+	return taskData.stat;
 }
 
 typedef struct _searchDoubleFaceTdTag {
-    unsigned int    start, end;
-    TaskData*       taskData;
-    MSelectionList  invalidList;
-    MStatus         stat;
+	unsigned int    start, end;
+	TaskData* taskData;
+	MSelectionList  invalidList;
+	MStatus         stat;
 } SearchMeshDoubleFaceTdData;
 
 template<typename T>
-void hash_combine(size_t & seed, T const& v) {
-    std::hash<T> primitive_type_hash;
-    seed ^= primitive_type_hash(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+void hash_combine(size_t& seed, T const& v) {
+	std::hash<T> primitive_type_hash;
+	seed ^= primitive_type_hash(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
 
 namespace std {
-    template<>
-        class hash<MPoint> {
-            public:
-                size_t operator() (const MPoint& p) const {
-                    std::size_t seed = 0;
-                    hash_combine(seed, p.x);
-                    hash_combine(seed, p.y);
-                    hash_combine(seed, p.z);
-                    //hash_combine(seed, p.w);
-                    return seed;
-                }
-        };
+	template<>
+	class hash<MPoint> {
+	public:
+		size_t operator() (const MPoint& p) const {
+			std::size_t seed = 0;
+			hash_combine(seed, p.x);
+			hash_combine(seed, p.y);
+			hash_combine(seed, p.z);
+			//hash_combine(seed, p.w);
+			return seed;
+		}
+	};
+}
+
+MStatus setInvalidFace(const uint& faceId, MItMeshPolygon& itMeshPolygon, const MDagPath& dagPath, MSelectionList& invalidList)
+{
+	int prevIndex;
+	auto stat = itMeshPolygon.setIndex(faceId, prevIndex);
+	if (stat != MStatus::kSuccess) {
+		return stat;
+	}
+
+	MObject component = itMeshPolygon.currentItem(&stat);
+	if (stat != MStatus::kSuccess) {
+		return stat;
+	}
+
+	stat = invalidList.add(dagPath, component);
+	if (stat != MStatus::kSuccess) {
+		return stat;
+	}
+
+	return stat;
 }
 
 // step 2
- MThreadRetVal searchDoubleFaceTd(void* data) {
-     SearchMeshDoubleFaceTdData* td = (SearchMeshDoubleFaceTdData*)data;
-     TaskData* taskData = td->taskData;
+MThreadRetVal searchDoubleFaceTd(void* data) {
+	SearchMeshDoubleFaceTdData* td = (SearchMeshDoubleFaceTdData*)data;
+	TaskData* taskData = td->taskData;
 
-     MPointArray pnts;
-     std::unordered_map<MPoint, unsigned int> check_map{};
-     std::unordered_set<int> invalidVtxIds{};
-     for (unsigned int i = td->start; i < td->end; ++i) {
-         const MDagPath& dagPath = taskData->meshes[i];
+	MPointArray pnts;
+	std::unordered_map<MPoint, uint> centers{};
+	std::unordered_map<MPoint, std::unordered_set<MPoint>> centerFacePnts{};
+	for (unsigned int i = td->start; i < td->end; ++i) {
+		const MDagPath& dagPath = taskData->meshes[i];
 
-         MFnMesh fnMesh(dagPath, &td->stat);
-         CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not create MFnMesh.\n");
+		MFnMesh fnMesh(dagPath, &td->stat);
+		CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not create MFnMesh.\n");
 
-         td->stat = fnMesh.getPoints(pnts, MSpace::kObject);
-         CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not get points from MFnMesh.\n");
+		td->stat = fnMesh.getPoints(pnts, MSpace::kObject);
+		CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not get points from MFnMesh.\n");
 
-         check_map.clear();
-         check_map.reserve(pnts.length());
-         invalidVtxIds.clear();
-         invalidVtxIds.reserve(pnts.length());
-         for (unsigned int vtxId = 0; vtxId < pnts.length(); ++vtxId) {
-             MPoint& pnt = pnts[vtxId];
-             if (check_map.count(pnt) == 0) {
-                 check_map[pnt] = vtxId;
-             }
-             else {
-                 invalidVtxIds.insert(vtxId);
+		MItMeshPolygon itMeshPolygon(dagPath, MObject::kNullObj, &td->stat);
+		CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not create MItMeshPolygon.\n");
 
-                 unsigned int& sameVtxId = check_map[pnt];
-                 invalidVtxIds.insert(sameVtxId);
-             }
-         }
+		const int numPolygons = fnMesh.numPolygons(&td->stat);
+		CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not get numPolygons.\n");
 
-         if (invalidVtxIds.size() == 0) {
-             continue;
-         }
+		centers.clear();
+		centers.reserve(numPolygons);
 
-         MItMeshPolygon itMeshPolygon(dagPath, MObject::kNullObj, &td->stat);
-         CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not create MItMeshPolygon.\n");
+		MIntArray vtxIds;
+		for (int faceId = 0; faceId < numPolygons; ++faceId) {
+			td->stat = fnMesh.getPolygonVertices(faceId, vtxIds);
+			CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not get polygonVertices.\n");
 
-         const int numPolygons = fnMesh.numPolygons(&td->stat);
-         CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not get numPolygons.\n");
+			MPoint centerPoint(0, 0, 0);
+			std::unordered_set<MPoint> facePnts{};
+			for (unsigned int v = 0; v < vtxIds.length(); ++v) {
+				auto vtxId = static_cast<unsigned int>(vtxIds[v]);
+				centerPoint += pnts[vtxId];
+				facePnts.insert(pnts[vtxId]);
+			}
+			centerPoint = centerPoint / (double)vtxIds.length();
 
-         MIntArray vtxIds;
-         MIntArray cVtxIds;
-         for (int faceId = 0; faceId < numPolygons; ++faceId) {
-             td->stat = fnMesh.getPolygonVertices(faceId, vtxIds);
-             CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not get polygonVertices.\n");
+			// 同じ中心座標があれば DoubleFace と判定する
+			auto itCenter = centers.find(centerPoint);
+			auto itFacePnts = centerFacePnts.find(centerPoint);
+			if (itCenter != centers.end()) {
+				// 同じ座標の頂点を持っているか追加で確認する
+				const auto& centerFacePnts = (*itFacePnts).second;
+				if (centerFacePnts.size() != facePnts.size()) {
+					// 要素数が違うなら違うはず
+					continue;
+				}
+				bool isSamePnts = true;
+				for (auto fi = centerFacePnts.cbegin(); fi != centerFacePnts.cend(); fi++) {
+					if (facePnts.count((*fi)) == 0) {
+						isSamePnts = false;
+					}
+				}
+				if (!isSamePnts) {
+					// すべての頂点座標が一致しないなら違うはず
+					continue;
+				}
 
-             bool isInvalidFace = true;
-             for (unsigned int v = 0; v < vtxIds.length(); ++v) {
-                 auto vtxId = static_cast<unsigned int>(vtxIds[v]);
-                 if (invalidVtxIds.count(vtxId) == 0) {
-                     isInvalidFace = false;
-                     break;
-                 }
-             }
+				// 判定に利用した face も invalidList に入れておく
+				const auto& centerFaceId = (*itCenter).second;
+				td->stat = setInvalidFace(centerFaceId, itMeshPolygon, dagPath, td->invalidList);
+				CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not add td->invlidList.\n");
+			}
+			else {
+				centers.insert({ centerPoint, faceId });
+				centerFacePnts.insert({ centerPoint, facePnts });
+			}
+		}
+	}
 
-             if (isInvalidFace) {
-                 int prevIndex;
-                 td->stat = itMeshPolygon.setIndex(faceId, prevIndex);
-                 CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not set index MItMeshPolygon1.\n");
-
-                 MObject component = itMeshPolygon.currentItem(&td->stat);
-                 CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not get currentItem MItMeshPolygon1.\n");
-
-                 td->stat = td->invalidList.add(dagPath, component);
-                 CheckErrorReturnMThreadRetVal(td->stat, "searchDoubleFaceTd: could not add td->invlidList1.\n");
-             }
-         }
-     }
-
-     return (MThreadRetVal)0;
+	return (MThreadRetVal)0;
 }
 
 void searchMeshDoubleFace(void* data, MThreadRootTask* root) {
-
-    const auto processor_count = std::thread::hardware_concurrency() * 10;
+	const auto processor_count = std::thread::hardware_concurrency() * 10;
 #ifdef _DEBUG
-    cerr << "processour_count = " << processor_count << ".\n";
+	cerr << "processour_count = " << processor_count << ".\n";
 #endif // _DEBUG
 
-    TaskData* taskData = (TaskData *)data;
+	TaskData* taskData = (TaskData*)data;
 
-    unsigned int size;
-    if (processor_count < taskData->meshes.size()) {
-        size = processor_count;
-    }
-    else {
-        size = static_cast<unsigned int>(taskData->meshes.size());
-    }
+	unsigned int size;
+	if (processor_count < taskData->meshes.size()) {
+		size = processor_count;
+	}
+	else {
+		size = static_cast<unsigned int>(taskData->meshes.size());
+	}
 
-    std::vector<SearchMeshDoubleFaceTdData> threadData(size);
+	std::vector<SearchMeshDoubleFaceTdData> threadData(size);
 
-    float size_f = static_cast<float>(size);
-    float meshLength_f = static_cast<float>(taskData->meshes.size());
+	float size_f = static_cast<float>(size);
+	float meshLength_f = static_cast<float>(taskData->meshes.size());
 
-    for (unsigned int i = 0; i < size; ++i) {
-        threadData[i].start = static_cast<unsigned int>(meshLength_f / size_f * i);
-        threadData[i].end = static_cast<unsigned int>(meshLength_f / size_f * (i + 1));
-        threadData[i].taskData = taskData;
-        threadData[i].stat = MStatus::kSuccess;
+	for (unsigned int i = 0; i < size; ++i) {
+		threadData[i].start = static_cast<unsigned int>(meshLength_f / size_f * i);
+		threadData[i].end = static_cast<unsigned int>(meshLength_f / size_f * (i + 1));
+		threadData[i].taskData = taskData;
+		threadData[i].stat = MStatus::kSuccess;
 
-        MThreadPool::createTask(searchDoubleFaceTd, (void *)&threadData[i], root);
-    }
+		MThreadPool::createTask(searchDoubleFaceTd, (void*)&threadData[i], root);
+	}
 
-    MThreadPool::executeAndJoin(root);
+	MThreadPool::executeAndJoin(root);
 
-    for (unsigned int i = 0; i < size; ++i) {
-        if (threadData[i].invalidList.length() > 0) {
-            taskData->stat = taskData->invalidList.merge(threadData[i].invalidList);
-            CheckErrorBreak(taskData->stat, "searchMeshDoubleFace: could not merge invalid list\n");
-        }
+	for (unsigned int i = 0; i < size; ++i) {
+		if (threadData[i].invalidList.length() > 0) {
+			taskData->stat = taskData->invalidList.merge(threadData[i].invalidList);
+			CheckErrorBreak(taskData->stat, "searchMeshDoubleFace: could not merge invalid list\n");
+		}
 
-        taskData->stat = threadData[i].stat;
-        CheckErrorBreak(taskData->stat, "searchMeshDoubleFace: thread error\n");
-    }
+		taskData->stat = threadData[i].stat;
+		CheckErrorBreak(taskData->stat, "searchMeshDoubleFace: thread error\n");
+	}
 }
 
 MStatus checkMeshDoubleFace::doIt(const MArgList& args) {
-    MStatus stat = MStatus::kSuccess;
+	MStatus stat = MStatus::kSuccess;
 
 #ifdef _DEBUG
-    Timer timer = Timer(&stat);
-    if (MStatus::kSuccess != stat) {
-        return stat;
-    }
+	Timer timer = Timer(&stat);
+	if (MStatus::kSuccess != stat) {
+		return stat;
+	}
 #endif // _DEBUG
 
-    MArgParser argData(syntax(), args, &stat);
+	MArgParser argData(syntax(), args, &stat);
 
-    if (argData.isFlagSet("select")) {
-        _isSelect = true;
-        MGlobal::getActiveSelectionList(_beforeSelection);
-    }
-    else {
-        _isSelect = false;
-    }
+	if (argData.isFlagSet("select")) {
+		_isSelect = true;
+		MGlobal::getActiveSelectionList(_beforeSelection);
+	}
+	else {
+		_isSelect = false;
+	}
 
 #ifdef _DEBUG
-    cerr << "parse argData = " << timer.elapsed(&stat) << "sec.\n";
-    CheckDisplayError(stat, "doIt: parse argData timer elapsed error.");
-    stat = timer.restart();
-    CheckDisplayError(stat, "doIt: parse argData timer reset error.");
+	cerr << "parse argData = " << timer.elapsed(&stat) << "sec.\n";
+	CheckDisplayError(stat, "doIt: parse argData timer elapsed error.");
+	stat = timer.restart();
+	CheckDisplayError(stat, "doIt: parse argData timer reset error.");
 #endif // _DEBUG
 
-    // ======================================================================
-    // step 1
-    TaskData taskData;
-    stat = getAllMesh(taskData);
-    CheckDisplayError(stat, "doIt: getAllMesh.\n");
+	// ======================================================================
+	// step 1
+	TaskData taskData;
+	stat = getAllMesh(taskData);
+	CheckDisplayError(stat, "doIt: getAllMesh.\n");
 
 #ifdef _DEBUG
-    cerr << "getAllMesh = " << timer.elapsed(&stat) << "sec.\n";
-    CheckDisplayError(stat, "doIt: getAllMesh timer elapsed error.");
-    stat = timer.restart();
-    CheckDisplayError(stat, "doIt: getAllMesh timer reset error.");
+	cerr << "getAllMesh = " << timer.elapsed(&stat) << "sec.\n";
+	CheckDisplayError(stat, "doIt: getAllMesh timer elapsed error.");
+	stat = timer.restart();
+	CheckDisplayError(stat, "doIt: getAllMesh timer reset error.");
 #endif // _DEBUG
 
-    // ======================================================================
-    // check mesh size.
-    if (taskData.meshes.size() == 0) {
-        stat = redoIt();
-        return stat;
-    }
+	// ======================================================================
+	// check mesh size.
+	if (taskData.meshes.size() == 0) {
+		stat = redoIt();
+		return stat;
+	}
 
-    // ======================================================================
-    // Thread init.
-    stat = MThreadPool::init();
-    CheckDisplayError(stat, "doIt: could not create threadpool.\n");
+	// ======================================================================
+	// Thread init.
+	stat = MThreadPool::init();
+	CheckDisplayError(stat, "doIt: could not create threadpool.\n");
 
 #ifdef _DEBUG
-    cerr << "MThreadPool = " << timer.elapsed(&stat) << "sec.\n";
-    CheckDisplayError(stat, "doIt: MThreadPool timer elapsed error.");
-    stat = timer.restart();
-    CheckDisplayError(stat, "doIt: MThreadPool timer reset error.");
+	cerr << "MThreadPool = " << timer.elapsed(&stat) << "sec.\n";
+	CheckDisplayError(stat, "doIt: MThreadPool timer elapsed error.");
+	stat = timer.restart();
+	CheckDisplayError(stat, "doIt: MThreadPool timer reset error.");
 #endif // _DEBUG
 
-    // ======================================================================
-    // step 2
-    MThreadPool::newParallelRegion(searchMeshDoubleFace, (void *)&taskData);
-    CheckDisplayErrorRelease(taskData.stat, "doIt: countMeshes error.");
+	// ======================================================================
+	// step 2
+	MThreadPool::newParallelRegion(searchMeshDoubleFace, (void*)&taskData);
+	CheckDisplayErrorRelease(taskData.stat, "doIt: countMeshes error.");
 
 #ifdef _DEBUG
-    cerr << "searchMeshDoubleFace = " << timer.elapsed(&stat) << "sec.\n";
-    CheckDisplayError(stat, "doIt: searchMeshDoubleFace timer elapsed error.");
-    stat = timer.restart();
-    CheckDisplayError(stat, "doIt: searchMeshDoubleFace timer reset error.");
+	cerr << "searchMeshDoubleFace = " << timer.elapsed(&stat) << "sec.\n";
+	CheckDisplayError(stat, "doIt: searchMeshDoubleFace timer elapsed error.");
+	stat = timer.restart();
+	CheckDisplayError(stat, "doIt: searchMeshDoubleFace timer reset error.");
 #endif // _DEBUG
 
-    _invalid = taskData.invalidList;
+	_invalid = taskData.invalidList;
 
-    stat = redoIt();
+	stat = redoIt();
 
-    return stat;
-}
+	return stat;
+	}
 
 MStatus checkMeshDoubleFace::redoIt() {
-    if (_isSelect) {
-        MStatus stat = MGlobal::setActiveSelectionList(_invalid);
-        return stat;
-    }
-    MStringArray results;
-    MStatus stat = _invalid.getSelectionStrings(results);
-    CheckDisplayError(stat, "redoIt: invalid.getSelectionStrings is failed.\n");
+	if (_isSelect) {
+		MStatus stat = MGlobal::setActiveSelectionList(_invalid);
+		return stat;
+	}
+	MStringArray results;
+	MStatus stat = _invalid.getSelectionStrings(results);
+	CheckDisplayError(stat, "redoIt: invalid.getSelectionStrings is failed.\n");
 
-    setResult(results);
-    return stat;
+	setResult(results);
+	return stat;
 }
 
 MStatus checkMeshDoubleFace::undoIt() {
-    if (_isSelect) {
-        MStatus stat = MGlobal::setActiveSelectionList(_beforeSelection);
-        return stat;
-    }
-    return MStatus::kSuccess;
+	if (_isSelect) {
+		MStatus stat = MGlobal::setActiveSelectionList(_beforeSelection);
+		return stat;
+	}
+	return MStatus::kSuccess;
 }
 
 bool checkMeshDoubleFace::isUndoable() const {
-    return true;
+	return true;
 }
 
 void* checkMeshDoubleFace::creator() {
-    return new checkMeshDoubleFace();
+	return new checkMeshDoubleFace();
 }
 
 MStatus initializePlugin(MObject obj)
 {
-    MFnPlugin plugin(obj, "nrtkbb", "1.0", "Any");
-    plugin.registerCommand("checkMeshDoubleFace",
-            checkMeshDoubleFace::creator, checkMeshDoubleFace::createSyntax);
-    return MS::kSuccess;
+	MFnPlugin plugin(obj, "nrtkbb", "1.0", "Any");
+	plugin.registerCommand("checkMeshDoubleFace",
+		checkMeshDoubleFace::creator, checkMeshDoubleFace::createSyntax);
+	return MS::kSuccess;
 }
 MStatus uninitializePlugin(MObject obj)
 {
-    MFnPlugin plugin( obj );
-    plugin.deregisterCommand("checkMeshDoubleFace");
-    return MS::kSuccess;
+	MFnPlugin plugin(obj);
+	plugin.deregisterCommand("checkMeshDoubleFace");
+	return MS::kSuccess;
 }
-
